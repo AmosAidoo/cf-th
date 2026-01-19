@@ -28,7 +28,7 @@ API_BASE_URL=
 
 ## What would make the customer even more happy
 - I believe that given the customer attribute mapping json file, the customer will be very happy if the answers to the questions from the leads are cleanly mapped to those JSON files. I demonstrated a basic solution where the questions are mapped to the attributes and the answers are compared to the possible valid answers based on substrings or complete matches. More of in the next section.
-- 
+- An improvement over this keyword-based rules would be an LLM based solution that would be help translate trickier answers better.
 
 ## How the mapping from question to customer attribute mapping works
 In a real system, a much more robust approach would be taken. The API requires enum values to be present so I chose some sensible default values. Here is the mapping used, fallbacks and default values:
