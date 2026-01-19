@@ -1,13 +1,16 @@
 # cf-th
 
 ## Solution
+
+![UI Screenshot](/screenshot.png)
+
 This is a small Nodejs app. The solution is contained in index.js. An accompanying UI, which was entirely generated with AI, reviewed and tweaked by myself, is included in `view/index.ejs`. The url to live solution is here on Render: [Link](https://solar-lead-pipeline.onrender.com/). Please note that because of the free version of Render, cold starts could take up to 30 seconds.
 
 For the `index.js` file, I wrote the API endpoints, request code to the simulated lead endpoints and validation logic and generated the surrounding code with AI.
 
 ## How to use the UI
 Click on the button with text, "Generate Test Lead". If the lead passes the filters, it will be sent to the customer.
-It can take a while to get such a lead so a second button with text "Auto-Generate Until Success" has been added which will simulate clicking the Generate button until the first sucessful lead that passes all filters.
+It can take a while to get such a lead so a second button with text "Auto-Generate Until Success" has been added which will simulate clicking the Generate button until the first sucessful lead that passes all filters but stops after 50 unsuccessful attempts. Kindly note that you will have to reload the page to see the list of recent leads. You won't have to do this when you click on "Generate Test Lead" though as the page reloads automatically.
 
 ## Running the solution locally
 - Clone this repository.
