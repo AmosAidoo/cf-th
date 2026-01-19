@@ -1,0 +1,535 @@
+require("dotenv").config()
+
+const express = require("express")
+const axios = require("axios")
+const app = express()
+
+const port = process.env.PORT || 3000
+const WEBHOOK_BASE_URL = process.env.WEBHOOK_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`
+
+app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
+app.set("view engine", "ejs")
+app.set("views", "./views")
+
+const USER_ID = "aidoo"
+const API_BASE_URL = process.env.API_BASE_URL
+const BEARER_TOKEN = process.env.BEARER_TOKEN
+const ZIPCODE_PREFIX = "66"
+
+let recentLeads = []
+const MAX_RECENT_LEADS = 10
+
+const QUESTION_TO_ATTRIBUTE_MAPPING = {
+	"Sind Sie Eigentümer der Immobilie?": {
+		attribute: "solar_owner",
+		valueMapping: {
+			"Ja": "Ja",
+			"ja": "Ja",
+			"true": "Ja",
+			"Nein": "Nein",
+			"nein": "Nein",
+			"false": "Nein",
+			"In Auftrag": "In Auftrag"
+		}
+	},
+	"Welche Dachform haben Sie auf Ihrem Haus?": {
+		attribute: "solar_roof_type",
+		valueMapping: {
+			"Satteldach": "Satteldach",
+			"Flachdach": "Flachdach",
+			"Pultdach": "Pultdach",
+			"Walmdach": "Walmdach",
+			"Mansardendach": "Mansardendach",
+			"Andere": "Andere",
+			"Kaffeemühlenhaus": "Kaffeemühlenhaus",
+			"Krüppelwalmdach": "Krüppelwalmdach",
+			"Versetztes Pultdach": "Versetztes Pultdach",
+			"Winkelwalmdach": "Winkelwalmdach",
+			"Zwerchdach": "Zwerchdach"
+		}
+	},
+	"Wie hoch schätzen Sie ihren Stromverbrauch?": {
+		attribute: "solar_energy_consumption",
+		valueMapping: null
+	},
+	"Wo möchten Sie die Solaranlage installieren?": {
+		attribute: "solar_property_type",
+		valueMapping: {
+			"Einfamilienhaus": "Einfamilienhaus",
+			"Zweifamilienhaus": "Zweifamilienhaus",
+			"Mehrfamilienhaus": "Mehrfamilienhaus",
+			"Mehrfamilienhaus / Wohnanlage": "Mehrfamilienhaus",
+			"Firmengebäude": "Firmengebäude",
+			"Freilandfläche": "Freilandfläche",
+			"Garage": "Garage",
+			"Carport": "Carport",
+			"Scheune/Landwirtschaft": "Scheune/Landwirtschaft",
+			"Lagerhalle": "Lagerhalle",
+			"Industrie": "Industrie"
+		}
+	},
+	"Wie alt ist Ihr Dach?": {
+		attribute: "solar_roof_age",
+		valueMapping: {
+			"Vor 1990": "Älter als 30 Jahre",
+			"Älter als 30 Jahre": "Älter als 30 Jahre",
+			"Jünger als 30 Jahre": "Jünger als 30 Jahre",
+			"Gerade erst gebaut": "Gerade erst gebaut",
+			"Erst in Planung": "Erst in Planung"
+		}
+	},
+	"Dachmaterial": {
+		attribute: "solar_roof_material",
+		valueMapping: {
+			"Dachziegel": "Dachziegel",
+			"Asbest": "Asbest",
+			"Bitumen": "Bitumen",
+			"Blech/Trapezblech": "Blech/Trapezblech",
+			"Gründach": "Gründach",
+			"Holzdach": "Holzdach",
+			"Kies": "Kies",
+			"Schiefer": "Schiefer",
+			"Schindeldach": "Schindeldach",
+			"Andere": "Andere"
+		}
+	},
+	"Dachausrichtung": {
+		attribute: "solar_south_location",
+		valueMapping: {
+			"Süd": "Süd",
+			"Süd/West": "Süd-West",
+			"Süd-West": "Süd-West",
+			"Süd/Ost": "Süd-Ost",
+			"Süd-Ost": "Süd-Ost",
+			"West": "West",
+			"Ost": "Ost",
+			"Ja": "Ja",
+			"Nein": "Nein",
+			"Teilweise": "Teilweise",
+			"Nicht sicher": "Nicht sicher",
+			"Keine (Flachdach)": "Keine (Flachdach)"
+		}
+	},
+	"Stromspeicher gewünscht": {
+		attribute: "solar_power_storage",
+		valueMapping: {
+			"Ja": "Ja",
+			"ja": "Ja",
+			"Nein": "Nein",
+			"nein": "Nein",
+			"Noch nicht sicher": "Noch nicht sicher",
+			"Nicht sicher": "Noch nicht sicher"
+		}
+	},
+	"Finanzierung": {
+		attribute: "solar_offer_type",
+		valueMapping: {
+			"Kaufen": "Kaufen",
+			"Mieten": "Mieten",
+			"Beides interessant": "Beides interessant",
+			"Nicht sicher": "Beides interessant"
+		}
+	},
+	"Dachfläche": {
+		attribute: "solar_area",
+		valueMapping: null
+	}
+}
+
+const VALID_ATTRIBUTE_VALUES = {
+	solar_owner: ["Ja", "Nein", "In Auftrag"],
+	solar_roof_type: ["Andere", "Flachdach", "Kaffeemühlenhaus", "Krüppelwalmdach", "Mansardendach", "Pultdach", "Satteldach", "Versetztes Pultdach", "Walmdach", "Winkelwalmdach", "Zwerchdach"],
+	solar_property_type: ["Einfamilienhaus", "Zweifamilienhaus", "Mehrfamilienhaus", "Firmengebäude", "Freilandfläche", "Garage", "Carport", "Scheune/Landwirtschaft", "Lagerhalle", "Industrie"],
+	solar_roof_age: ["Erst in Planung", "Gerade erst gebaut", "Jünger als 30 Jahre", "Älter als 30 Jahre"],
+	solar_roof_material: ["Asbest", "Bitumen", "Blech/Trapezblech", "Dachziegel", "Gründach", "Holzdach", "Kies", "Schiefer", "Schindeldach", "Andere"],
+	solar_south_location: ["Ja", "Nein", "Teilweise", "Nicht sicher", "Keine (Flachdach)", "Süd", "Süd-West", "Süd-Ost", "West", "Ost"],
+	solar_power_storage: ["Ja", "Nein", "Noch nicht sicher"],
+	solar_offer_type: ["Beides interessant", "Mieten", "Kaufen"]
+}
+
+function isHouseOwner(lead) {
+	const ownershipQuestion = lead.questions["Sind Sie Eigentümer der Immobilie?"]
+	if (!ownershipQuestion) return false
+	
+	const normalized = ownershipQuestion.toLowerCase().trim()
+	return normalized === "ja" || normalized === "true"
+}
+
+function splitStreetAndHouseNumber(street) {
+	if (!street) return ["", ""]
+	let hnPos = street.search(/\d/)
+	return [
+		hnPos > -1 ? street.substring(0, hnPos).trim() : street.trim(),
+		hnPos > -1 ? street.substring(hnPos).trim() : ""
+	]
+}
+
+function mapLeadAttributes(questions) {
+	const attributes = {}
+	const unmappedWarnings = []
+	
+	for (const [question, answer] of Object.entries(questions)) {
+		if (!answer || answer === "") continue
+		
+		const mapping = QUESTION_TO_ATTRIBUTE_MAPPING[question]
+		if (!mapping) {
+			const warning = `No mapping found for question: "${question}"`
+			console.log(`[WARN] ${warning}`)
+			unmappedWarnings.push({ question, answer, reason: "question_not_mapped" })
+			continue
+		}
+		
+		const { attribute, valueMapping } = mapping
+		
+		if (valueMapping === null) {
+			const numericValue = String(answer).trim()
+			if (numericValue && !isNaN(numericValue)) {
+				attributes[attribute] = numericValue
+			} else {
+				const warning = `Invalid numeric value "${answer}" for attribute "${attribute}"`
+				console.log(`[WARN] ${warning}`)
+				unmappedWarnings.push({ question, answer, attribute, reason: "invalid_numeric" })
+			}
+			continue
+		}
+		
+		const mappedValue = valueMapping[answer]
+		if (mappedValue) {
+			if (VALID_ATTRIBUTE_VALUES[attribute] && 
+			    !VALID_ATTRIBUTE_VALUES[attribute].includes(mappedValue)) {
+				const warning = `Invalid value "${mappedValue}" for attribute "${attribute}"`
+				console.log(`[WARN] ${warning}`)
+				unmappedWarnings.push({ question, answer, attribute, mappedValue, reason: "invalid_dropdown_value" })
+				continue
+			}
+			attributes[attribute] = mappedValue
+		} else {
+			const warning = `No value mapping found for "${answer}" in question "${question}"`
+			console.log(`[WARN] ${warning}`)
+			unmappedWarnings.push({ question, answer, attribute, reason: "answer_not_mapped" })
+		}
+	}
+	
+	return { attributes, unmappedWarnings }
+}
+
+function normalizePhone(phone) {
+	if (!phone) return ""
+	return phone.replace(/\s+/g, "").trim()
+}
+
+function normalizeZipcode(zipcode) {
+	if (!zipcode) return ""
+	return zipcode.padStart(5, "0")
+}
+
+function validateTransformedLead(transformedLead) {
+	const errors = []
+	
+	if (!transformedLead.lead.phone) {
+		errors.push("Missing required field: phone")
+	}
+	if (!transformedLead.product.name) {
+		errors.push("Missing required field: product.name")
+	}
+	
+	if (errors.length > 0) {
+		console.log(`[ERROR] Lead validation failed: ${errors.join(", ")}`)
+		return false
+	}
+	
+	return true
+}
+
+async function sendToCustomerAPI(transformedLead, retries = 3) {
+	const url = `${API_BASE_URL}/receive/fake/${USER_ID}/`
+	
+	for (let attempt = 1; attempt <= retries; attempt++) {
+		try {
+			console.log(`[INFO] Sending lead to customer API (attempt ${attempt}/${retries})`)
+			console.log(`[DEBUG] Payload:`, JSON.stringify(transformedLead, null, 2))
+			
+			const response = await axios.post(url, transformedLead, {
+				headers: {
+					Authorization: `Bearer ${BEARER_TOKEN}`,
+					"Content-Type": "application/json"
+				}
+			})
+			
+			console.log(`[SUCCESS] Lead sent successfully. Response:`, response.data)
+			return { success: true, data: response.data }
+			
+		} catch (error) {
+			console.log(`[ERROR] Attempt ${attempt} failed:`, error.response?.data || error.message)
+			
+			if (error.response && error.response.status >= 400 && error.response.status < 500) {
+				console.log(`[ERROR] Client error (${error.response.status}), not retrying`)
+				return { 
+					success: false, 
+					error: error.response.data || error.message,
+					status: error.response.status 
+				}
+			}
+			
+			if (attempt < retries) {
+				const delay = Math.pow(2, attempt) * 1000
+				console.log(`[INFO] Retrying in ${delay}ms...`)
+				await new Promise(resolve => setTimeout(resolve, delay))
+			}
+		}
+	}
+	
+	return { success: false, error: "Max retries exceeded" }
+}
+
+function addToRecentLeads(leadData) {
+	recentLeads.unshift({
+		...leadData,
+		timestamp: new Date().toISOString()
+	})
+	
+	if (recentLeads.length > MAX_RECENT_LEADS) {
+		recentLeads = recentLeads.slice(0, MAX_RECENT_LEADS)
+	}
+}
+
+app.get("/", (req, res) => {
+	res.render("index", { 
+		recentLeads,
+		config: {
+			userId: USER_ID,
+			zipcodePrefix: ZIPCODE_PREFIX,
+			webhookUrl: `${WEBHOOK_BASE_URL}/webhook`
+		}
+	})
+})
+
+app.get("/trigger", async (req, res) => {
+	try {
+		console.log(`[INFO] UI: Triggering lead generation...`)
+		
+		const webhookUrl = `${WEBHOOK_BASE_URL}/webhook`
+		
+		await axios.post(
+			`${API_BASE_URL}/trigger/fake/${USER_ID}/`,
+			{
+				url: webhookUrl
+			},
+			{
+				headers: {
+					Authorization: `Bearer ${BEARER_TOKEN}`
+				}
+			}
+		)
+		
+		console.log(`[SUCCESS] UI: Lead trigger successful`)
+		
+		res.redirect("/?success=true")
+		
+	} catch (error) {
+		console.log(`[ERROR] UI: Failed to trigger pipeline:`, error.response?.data || error.message)
+		res.redirect("/?error=" + encodeURIComponent(error.message))
+	}
+})
+
+app.post("/clear", (req, res) => {
+	recentLeads = []
+	console.log(`[INFO] UI: Cleared recent leads`)
+	res.redirect("/")
+})
+
+// ============================================
+// API ROUTES
+// ============================================
+
+app.post("/webhook", async (req, res) => {
+	const newLead = req.body
+	
+	console.log(`[INFO] Received new lead:`, JSON.stringify(newLead, null, 2))
+	
+	const leadResult = {
+		receivedAt: new Date().toISOString(),
+		originalLead: newLead,
+		status: null,
+		reason: null,
+		transformedLead: null,
+		customerResponse: null,
+		warnings: [],
+		error: null
+	}
+	
+	try {
+		// Step 1: Filter by zipcode
+		if (!newLead.zipcode || !newLead.zipcode.startsWith(ZIPCODE_PREFIX)) {
+			console.log(`[FILTER] Lead rejected: zipcode "${newLead.zipcode}" does not start with ${ZIPCODE_PREFIX}`)
+			leadResult.status = "filtered"
+			leadResult.reason = `Zipcode must start with ${ZIPCODE_PREFIX}`
+			addToRecentLeads(leadResult)
+			
+			return res.json({ 
+				status: "filtered", 
+				reason: `Zipcode must start with ${ZIPCODE_PREFIX}`,
+				lead_id: newLead.created_at 
+			})
+		}
+		
+		// Step 2: Filter by ownership
+		if (!isHouseOwner(newLead)) {
+			console.log(`[FILTER] Lead rejected: not a house owner`)
+			leadResult.status = "filtered"
+			leadResult.reason = "Lead must be house owner"
+			addToRecentLeads(leadResult)
+			
+			return res.json({ 
+				status: "filtered", 
+				reason: "Lead must be house owner",
+				lead_id: newLead.created_at 
+			})
+		}
+		
+		console.log(`[PASS] Lead passed filters (zipcode: ${newLead.zipcode}, owner: yes)`)
+		
+		// Step 3: Transform lead
+		const { attributes: leadAttributes, unmappedWarnings } = mapLeadAttributes(newLead.questions || {})
+		
+		if (unmappedWarnings.length > 0) {
+			console.log(`[WARN] Lead has ${unmappedWarnings.length} unmapped values:`, 
+			            JSON.stringify(unmappedWarnings, null, 2))
+			leadResult.warnings = unmappedWarnings
+		}
+		
+		const [street, housenumber] = splitStreetAndHouseNumber(newLead.street)
+		
+		const transformedLead = {
+			lead: {
+				phone: normalizePhone(newLead.phone),
+				email: newLead.email || "",
+				first_name: newLead.first_name || "",
+				last_name: newLead.last_name || "",
+				street: street || "",
+				housenumber: housenumber || "",
+				postcode: normalizeZipcode(newLead.zipcode),
+				city: newLead.city || "",
+				country: "de"
+			},
+			product: {
+				name: "makler"
+			},
+			lead_attributes: leadAttributes,
+			meta_attributes: {
+				unique_id: newLead.created_at ? String(newLead.created_at) : "",
+				landingpage_url: "",
+				utm_campaign: "",
+				utm_content: "",
+				utm_medium: "",
+				utm_placement: "",
+				utm_source: "",
+				utm_term: "",
+				ip: "",
+				browser: "",
+				optin: false,
+				optin_wording: "",
+				optin_wording_2: ""
+			}
+		}
+		
+		leadResult.transformedLead = transformedLead
+		
+		// Step 4: Validate transformed lead
+		if (!validateTransformedLead(transformedLead)) {
+			console.log(`[ERROR] Transformed lead failed validation`)
+			leadResult.status = "error"
+			leadResult.reason = "Lead validation failed"
+			addToRecentLeads(leadResult)
+			
+			return res.status(400).json({ 
+				status: "error", 
+				message: "Lead validation failed",
+				lead_id: newLead.created_at 
+			})
+		}
+		
+		// Step 5: Send to customer API
+		const result = await sendToCustomerAPI(transformedLead)
+		
+		if (result.success) {
+			leadResult.status = "success"
+			leadResult.customerResponse = result.data
+			addToRecentLeads(leadResult)
+			
+			return res.json({ 
+				status: "success", 
+				message: "Lead sent to customer API",
+				lead_id: newLead.created_at,
+				customer_response: result.data,
+				warnings: unmappedWarnings.length > 0 ? unmappedWarnings : undefined
+			})
+		} else {
+			leadResult.status = "error"
+			leadResult.reason = "Failed to send to customer API"
+			leadResult.error = result.error
+			addToRecentLeads(leadResult)
+			
+			return res.status(500).json({ 
+				status: "error", 
+				message: "Failed to send lead to customer API",
+				error: result.error,
+				lead_id: newLead.created_at 
+			})
+		}
+		
+	} catch (error) {
+		console.log(`[ERROR] Unexpected error processing lead:`, error)
+		leadResult.status = "error"
+		leadResult.reason = "Internal server error"
+		leadResult.error = error.message
+		addToRecentLeads(leadResult)
+		
+		return res.status(500).json({ 
+			status: "error", 
+			message: "Internal server error",
+			error: error.message 
+		})
+	}
+})
+
+app.get("/pipeline", async (req, res) => {
+	try {
+		console.log(`[INFO] API: Triggering lead generation...`)
+		
+		const response = await axios.post(
+			`${API_BASE_URL}/trigger/fake/${USER_ID}/`,
+			{
+				url: `${WEBHOOK_BASE_URL}/webhook`
+			},
+			{
+				headers: {
+					Authorization: `Bearer ${BEARER_TOKEN}`
+				}
+			}
+		)
+		
+		console.log(`[SUCCESS] API: Lead trigger successful:`, response.data)
+		return res.json({ 
+			status: "ok", 
+			message: "Pipeline triggered successfully",
+			data: response.data 
+		})
+		
+	} catch (error) {
+		console.log(`[ERROR] API: Failed to trigger pipeline:`, error.response?.data || error.message)
+		return res.status(500).json({ 
+			status: "error", 
+			message: "Failed to trigger pipeline",
+			error: error.response?.data || error.message 
+		})
+	}
+})
+
+app.listen(port, () => {
+	console.log(`[INFO] Server listening on port ${port}`)
+	console.log(`[INFO] Dashboard: http://localhost:${port}`)
+	console.log(`[INFO] Webhook endpoint: ${WEBHOOK_BASE_URL}/webhook`)
+	console.log(`[INFO] Test endpoint: http://localhost:${port}/pipeline`)
+})
