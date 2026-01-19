@@ -12,6 +12,12 @@ For the `index.js` file, I wrote the API endpoints, request code to the simulate
 Click on the button with text, "Generate Test Lead". If the lead passes the filters, it will be sent to the customer.
 It can take a while to get such a lead so a second button with text "Auto-Generate Until Success" has been added which will simulate clicking the Generate button until the first sucessful lead that passes all filters but stops after 50 unsuccessful attempts. Kindly note that you will have to reload the page to see the list of recent leads. You won't have to do this when you click on "Generate Test Lead" though as the page reloads automatically.
 
+## How to use the API
+```
+curl -X GET host:port/pipeline
+```
+This will trigger
+
 ## Running the solution locally
 - Clone this repository.
 - Run `npm install`.

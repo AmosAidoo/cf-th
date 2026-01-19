@@ -415,39 +415,6 @@ app.post("/webhook", async (req, res) => {
 	}
 })
 
-app.get("/pipeline", async (req, res) => {
-	try {
-		console.log(`[INFO] API: Triggering lead generation...`)
-		
-		const response = await axios.post(
-			`${API_BASE_URL}/trigger/fake/${USER_ID}/`,
-			{
-				url: `${WEBHOOK_BASE_URL}/webhook`
-			},
-			{
-				headers: {
-					Authorization: `Bearer ${BEARER_TOKEN}`
-				}
-			}
-		)
-		
-		console.log(`[SUCCESS] API: Lead trigger successful:`, response.data)
-		return res.json({ 
-			status: "ok", 
-			message: "Pipeline triggered successfully",
-			data: response.data 
-		})
-		
-	} catch (error) {
-		console.log(`[ERROR] API: Failed to trigger pipeline:`, error.response?.data || error.message)
-		return res.status(500).json({ 
-			status: "error", 
-			message: "Failed to trigger pipeline",
-			error: error.response?.data || error.message 
-		})
-	}
-})
-
 app.listen(port, () => {
 	console.log(`[INFO] Server listening on port ${port}`)
 	console.log(`[INFO] Dashboard: http://localhost:${port}`)
