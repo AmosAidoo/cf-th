@@ -5,6 +5,10 @@ This is a small Nodejs app. The solution is contained in index.js. An accompanyi
 
 For the `index.js` file, I wrote the API endpoints, request code to the simulated lead endpoints and validation logic and generated the surrounding code with AI.
 
+## How to use the UI
+Click on the button with text, "Generate Test Lead". If the lead passes the filters, it will be sent to the customer.
+It can take a while to get such a lead so a second button with text "Auto-Generate Until Success" has been added which will simulate clicking the Generate button until the first sucessful lead that passes all filters.
+
 ## Running the solution locally
 - Clone this repository.
 - Run `npm install`.

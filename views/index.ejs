@@ -70,24 +70,57 @@
 								</div>
 								<div>
 									<p class="text-gray-500 font-medium">Webhook URL</p>
-									<p class="text-gray-900 font-mono text-xs">
+									<p id="pWebhookUrl" class="text-gray-900 font-mono text-xs">
 										<%= config.webhookUrl %>
 									</p>
 								</div>
 							</div>
 						</div>
 
-						<!--  Trigger Section -->
+						<!-- Trigger Section with loading state and auto-retry -->
 						<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
 							<h2 class="text-lg font-semibold text-gray-900 mb-4">🚀 Trigger Lead Generation</h2>
-							<p class="text-gray-600 mb-4">Click the button below to request a test lead from the API. The lead will be
-								sent to your webhook and processed automatically.</p>
+							<p class="text-gray-600 mb-4">Click the button below to request a test lead from the API. The lead will be sent to
+								your webhook and processed automatically.</p>
+						
+							<form action="/trigger" id="triggerForm">
+								<div class="flex gap-3">
+									<button type="submit" id="triggerButton"
+										class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors duration-200 shadow-sm disabled:bg-gray-400 disabled:cursor-not-allowed inline-flex items-center gap-2">
+										<span id="buttonText">Generate Test Lead</span>
+									</button>
 
-							<form action="/trigger">
-								<button type="submit"
-									class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors duration-200 shadow-sm">
-									Generate Test Lead
-								</button>
+									<button type="button" id="autoRetryButton"
+										class="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors duration-200 shadow-sm disabled:bg-gray-400 disabled:cursor-not-allowed inline-flex items-center gap-2">
+										<svg id="autoRetrySpinner" class="animate-spin h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg"
+											fill="none" viewBox="0 0 24 24">
+											<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+											<path class="opacity-75" fill="currentColor"
+												d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+											</path>
+										</svg>
+										<span id="autoRetryText">Auto-Generate Until Success</span>
+									</button>
+						
+									<!-- Stop button (hidden by default) -->
+									<button type="button" id="stopButton"
+										class="bg-red-600 hover:bg-red-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors duration-200 shadow-sm hidden">
+										Stop
+									</button>
+								</div>
+						
+								<!-- Auto-retry status display -->
+								<div id="autoRetryStatus" class="mt-4 hidden">
+									<div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+										<p class="text-sm font-semibold text-blue-900 mb-2">Auto-generating leads...</p>
+										<div class="space-y-1 text-xs text-blue-800">
+											<p>Attempts: <span id="attemptCount" class="font-bold">0</span></p>
+											<p>Filtered: <span id="filteredCount" class="font-bold">0</span></p>
+											<p>Errors: <span id="errorCount" class="font-bold">0</span></p>
+											<p class="text-blue-600 italic" id="statusMessage">Starting...</p>
+										</div>
+									</div>
+								</div>
 							</form>
 						</div>
 
@@ -232,13 +265,125 @@
 
 	<!--  Auto-refresh script (optional, refreshes every 5 seconds if a lead was just triggered) -->
 	<script>
-		const urlParams = new URLSearchParams(window.location.search);
-		if (urlParams.get('success') === 'true') {
-			// Clear the success parameter after showing message
-			setTimeout(() => {
-				window.history.replaceState({}, document.title, window.location.pathname);
-			}, 3000);
-		}
+		// Auto-retry functionality
+			let autoRetryActive = false;
+			let attemptCount = 0;
+			let filteredCount = 0;
+			let errorCount = 0;
+
+			async function triggerLead(webhookUrl) {
+				const response = await fetch('/trigger', {
+					redirect: 'manual' // Don't follow redirects automatically
+				});
+
+				// Since the server redirects, we need to check the location header
+				// or just wait and check the recent leads
+				await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for processing
+
+				// Fetch the latest lead status
+				const statusResponse = await fetch('/api/latest-lead');
+				return await statusResponse.json();
+			}
+
+			document.getElementById('autoRetryButton').addEventListener('click', async function () {
+				const webhookUrl = document.getElementById('pWebhookUrl').textContent;
+				const autoRetryButton = document.getElementById('autoRetryButton');
+				const autoRetryText = document.getElementById('autoRetryText');
+				const autoRetrySpinner = document.getElementById('autoRetrySpinner');
+				const stopButton = document.getElementById('stopButton');
+				const autoRetryStatus = document.getElementById('autoRetryStatus');
+				const statusMessage = document.getElementById('statusMessage');
+				const triggerButton = document.getElementById('triggerButton');
+
+				// Reset counters
+				attemptCount = 0;
+				filteredCount = 0;
+				errorCount = 0;
+				autoRetryActive = true;
+
+				// Update UI
+				autoRetryButton.disabled = true;
+				triggerButton.disabled = true;
+				autoRetrySpinner.classList.remove('hidden');
+				autoRetryText.textContent = 'Generating...';
+				stopButton.classList.remove('hidden');
+				autoRetryStatus.classList.remove('hidden');
+
+				// Auto-retry loop
+				while (autoRetryActive) {
+					attemptCount++;
+					document.getElementById('attemptCount').textContent = attemptCount;
+					statusMessage.textContent = `Attempt #${attemptCount} - Triggering lead...`;
+
+					try {
+						const result = await triggerLead(webhookUrl);
+
+						if (result.status === 'success') {
+							// Success! Stop the loop
+							statusMessage.textContent = '✓ Success! Lead passed filters and sent to customer.';
+							statusMessage.className = 'text-green-600 font-bold italic';
+							autoRetryActive = false;
+
+							// Refresh page after 2 seconds to show the result
+							setTimeout(() => {
+								window.location.reload();
+							}, 2000);
+							break;
+						} else if (result.status === 'filtered') {
+							filteredCount++;
+							document.getElementById('filteredCount').textContent = filteredCount;
+							statusMessage.textContent = `Filtered: ${result.reason}`;
+						} else if (result.status === 'error') {
+							errorCount++;
+							document.getElementById('errorCount').textContent = errorCount;
+							statusMessage.textContent = `Error: ${result.reason || 'Unknown error'}`;
+						}
+
+						// Add a small delay between attempts
+						if (autoRetryActive) {
+							await new Promise(resolve => setTimeout(resolve, 1500));
+						}
+
+					} catch (error) {
+						errorCount++;
+						document.getElementById('errorCount').textContent = errorCount;
+						statusMessage.textContent = `Error: ${error.message}`;
+
+						// Wait before retrying on error
+						await new Promise(resolve => setTimeout(resolve, 2000));
+					}
+
+					// Safety limit: stop after 50 attempts
+					if (attemptCount >= 50) {
+						statusMessage.textContent = '⚠️ Reached maximum attempts (50). Stopping.';
+						statusMessage.className = 'text-red-600 font-bold italic';
+						autoRetryActive = false;
+					}
+				}
+
+				// Reset UI
+				autoRetryButton.disabled = false;
+				triggerButton.disabled = false;
+				autoRetrySpinner.classList.add('hidden');
+				autoRetryText.textContent = 'Auto-Generate Until Success';
+				stopButton.classList.add('hidden');
+			});
+
+			// Stop button handler
+			document.getElementById('stopButton').addEventListener('click', function () {
+				autoRetryActive = false;
+				document.getElementById('statusMessage').textContent = 'Stopped by user.';
+				document.getElementById('statusMessage').className = 'text-gray-600 italic';
+			});
+
+			// Auto-clear success message
+			const urlParams = new URLSearchParams(window.location.search);
+			if (urlParams.get('success') === 'true') {
+				// Clear the success parameter after showing message
+				setTimeout(() => {
+					window.history.replaceState({}, document.title, window.location.pathname);
+				}, 3000);
+			}
 	</script>
 </body>
 

@@ -341,6 +341,19 @@ app.post("/clear", (req, res) => {
 	res.redirect("/")
 })
 
+app.get("/api/latest-lead", (req, res) => {
+	if (recentLeads.length === 0) {
+		return res.json({ status: "none" })
+	}
+	
+	const latestLead = recentLeads[0]
+	res.json({
+		status: latestLead.status,
+		reason: latestLead.reason,
+		timestamp: latestLead.timestamp
+	})
+})
+
 // Api Routes
 app.post("/webhook", async (req, res) => {
 	const newLead = req.body
@@ -413,7 +426,7 @@ app.post("/webhook", async (req, res) => {
 				country: "de"
 			},
 			product: {
-				name: "makler"
+				name: "Solaranlagen"
 			},
 			lead_attributes: leadAttributes,
 			meta_attributes: {
